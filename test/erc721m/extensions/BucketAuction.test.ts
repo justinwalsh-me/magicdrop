@@ -1,8 +1,8 @@
-import { SignerWithAddress } from '@nomiclabs/hardhat-ethers/signers';
 import chai, { expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
 import { ethers } from 'hardhat';
 import { BucketAuction } from '../../../typechain-types';
+import { Signer } from 'ethers'
 
 chai.use(chaiAsPromised);
 
@@ -12,8 +12,8 @@ describe('BucketAuction', function () {
   let ba: BucketAuction;
   let ownerConn: BucketAuction;
   let readonlyConn: BucketAuction;
-  let owner: SignerWithAddress;
-  let readonly: SignerWithAddress;
+  let owner: Signer;
+  let readonly: Signer;
   let auctionStartTimestamp = 0;
   let auctionEndTimestamp = 1;
 
@@ -27,31 +27,31 @@ describe('BucketAuction', function () {
       '',
       /* maxMintableSupply= */ 1000,
       /* globalWalletLimit= */ 0,
-      ethers.constants.AddressZero,
+      ethers.ZeroAddress,
       60, // timestampExpirySeconds
       /* minimumContributionInWei= */ 100,
       0, // Placeholder; startTimeUnixSeconds will be overwritten later
       1, // Placeholder; endTimeUnixSeconds will be overwritten later
-      owner.address,
+      owner.getAddress(),
     );
-    await ba.deployed();
+    await ba.waitForDeployment();
 
     ownerConn = ba.connect(owner);
     await ownerConn.setStages([
       {
-        price: ethers.utils.parseEther('0.1'),
+        price: ethers.parseEther('0.1'),
         mintFee: 0,
         walletLimit: 0,
-        merkleRoot: ethers.utils.hexZeroPad('0x0', 32),
+        merkleRoot: ethers.zeroPadValue('0x00', 32),
         maxStageSupply: 100,
         startTimeUnixSeconds: 0,
         endTimeUnixSeconds: 1,
       },
       {
-        price: ethers.utils.parseEther('0.2'),
+        price: ethers.parseEther('0.2'),
         mintFee: 0,
         walletLimit: 0,
-        merkleRoot: ethers.utils.hexZeroPad('0x0', 32),
+        merkleRoot: ethers.zeroPadValue('0x00', 32),
         maxStageSupply: 100,
         startTimeUnixSeconds: 61,
         endTimeUnixSeconds: 62,
@@ -64,7 +64,7 @@ describe('BucketAuction', function () {
     // Set the start and end timestamps for the bucket Auction
     auctionStartTimestamp = block.timestamp + 100;
     auctionEndTimestamp = block.timestamp + 200;
-    ownerConn.setStartAndEndTimeUnixSeconds(
+    await ownerConn.setStartAndEndTimeUnixSeconds(
       auctionStartTimestamp,
       auctionEndTimestamp,
     );
@@ -87,14 +87,14 @@ describe('BucketAuction', function () {
         auctionStartTimestamp,
         auctionStartTimestamp,
       ),
-    ).to.be.revertedWith('InvalidStartAndEndTimestamp');
+    ).to.be.revertedWithCustomError(ownerConn, 'InvalidStartAndEndTimestamp');
     // It should be reverted if start is bigger than the end time
     await expect(
       ownerConn.setStartAndEndTimeUnixSeconds(
         auctionStartTimestamp,
         auctionStartTimestamp - 1,
       ),
-    ).to.be.revertedWith('InvalidStartAndEndTimestamp');
+    ).to.be.revertedWithCustomError(ownerConn, 'InvalidStartAndEndTimestamp');
     // Set both start and end times together
     await ownerConn.setStartAndEndTimeUnixSeconds(
       auctionStartTimestamp - 100,
@@ -117,7 +117,7 @@ describe('BucketAuction', function () {
         auctionStartTimestamp + 100,
         auctionEndTimestamp + 100,
       ),
-    ).to.be.revertedWith('PriceHasBeenSet');
+    ).to.be.revertedWithCustomError(ownerConn,'PriceHasBeenSet');
   });
 
   it('Auction is Active/Inactive according to the current time', async () => {
@@ -138,14 +138,14 @@ describe('BucketAuction', function () {
   describe('Bidding', function () {
     it('Reverts if the active stage is not a BucketAuction', async () => {
       // if the current active stage is not a bucket auction; revert with InvalidStage
-      await expect(readonlyConn.bid()).to.be.revertedWith(
+      await expect(readonlyConn.bid()).to.be.revertedWithCustomError(readonlyConn,
         'BucketAuctionNotActive',
       );
     });
 
     it('Reverts if auction not active', async () => {
       // it starts as Inactive, so we cannot make bids
-      await expect(readonlyConn.bid()).to.be.revertedWith(
+      await expect(readonlyConn.bid()).to.be.revertedWithCustomError(readonlyConn, 
         'BucketAuctionNotActive',
       );
     });
@@ -154,7 +154,7 @@ describe('BucketAuction', function () {
       // Active auction by setting the block.timestamp to the start time of the auction
       await ethers.provider.send('evm_mine', [auctionStartTimestamp]);
       // we cannot bid under the minimum
-      await expect(readonlyConn.bid({ value: 10 })).to.be.revertedWith(
+      await expect(readonlyConn.bid({ value: 10 })).to.be.revertedWithCustomError(readonlyConn, 
         'LowerThanMinBidAmount',
       );
     });
@@ -166,14 +166,14 @@ describe('BucketAuction', function () {
         readonlyConn,
         'Bid',
       );
-      let userData = await readonlyConn.getUserData(readonly.address);
+      let userData = await readonlyConn.getUserData(readonly.getAddress());
       expect(userData.contribution).to.eq(100);
       expect(userData.tokensClaimed).to.eq(0);
       expect(userData.refundClaimed).to.eq(false);
 
       // we let the readonly user bid again
       await readonlyConn.bid({ value: 100 });
-      userData = await readonlyConn.getUserData(readonly.address);
+      userData = await readonlyConn.getUserData(readonly.getAddress());
       expect(userData.contribution).to.eq(200);
       expect(userData.tokensClaimed).to.eq(0);
       expect(userData.refundClaimed).to.eq(false);
@@ -193,7 +193,7 @@ describe('BucketAuction', function () {
     it.skip('Can fetch pages of bids', async () => {
       const bidders = await ethers.getSigners();
       await ethers.provider.send('evm_mine', [auctionStartTimestamp]);
-
+      
       await Promise.all(
         bidders.map((bidder, i) => ba.connect(bidder).bid({ value: 100 + i })),
       );
@@ -261,7 +261,7 @@ describe('BucketAuction', function () {
       'SetMinimumContribution',
     );
     expect(await readonlyConn.getMinimumContributionInWei()).to.be.equal(999);
-    await expect(readonlyConn.setMinimumContribution(1999)).to.be.revertedWith(
+    await expect(readonlyConn.setMinimumContribution(1999)).to.be.revertedWithCustomError(readonlyConn, 
       'Unauthorized',
     );
   });
@@ -270,7 +270,7 @@ describe('BucketAuction', function () {
     // Setup the test context: block.timestamp should comply to the stage being active
     await ethers.provider.send('evm_mine', [auctionStartTimestamp]);
     // If the auction is active, then we cannot set price.
-    await expect(ownerConn.setPrice(200)).to.be.revertedWith(
+    await expect(ownerConn.setPrice(200)).to.be.revertedWithCustomError(ownerConn, 
       'BucketAuctionActive',
     );
 
@@ -279,7 +279,7 @@ describe('BucketAuction', function () {
 
     // If claimable, then we cannot set price.
     await ownerConn.setClaimable(true);
-    await expect(ownerConn.setPrice(200)).to.be.revertedWith(
+    await expect(ownerConn.setPrice(200)).to.be.revertedWithCustomError(ownerConn, 
       'CannotSetPriceIfClaimable',
     );
     // Clean up
@@ -294,14 +294,14 @@ describe('BucketAuction', function () {
 
     await expect(ownerConn.setPrice(200)).to.emit(ownerConn, 'SetPrice');
     expect(await readonlyConn.getPrice()).to.be.equal(200);
-    await expect(readonlyConn.setPrice(200)).to.be.revertedWith('Unauthorized');
+    await expect(readonlyConn.setPrice(200)).to.be.revertedWithCustomError(readonlyConn, 'Unauthorized');
   });
 
   it('Can set claimable', async () => {
     expect(await ownerConn.getClaimable()).to.be.equal(false);
 
     // Only owner can set claimable
-    await expect(readonlyConn.setClaimable(true)).to.be.revertedWith('Unauthorized');
+    await expect(readonlyConn.setClaimable(true)).to.be.revertedWithCustomError(readonlyConn, 'Unauthorized');
 
     await ownerConn.setClaimable(true);
     expect(await ownerConn.getClaimable()).to.be.equal(true);
@@ -329,10 +329,10 @@ describe('BucketAuction', function () {
           );
         }
 
-        const contribution = run.bids.reduce((a, b) => a + b, 0);
+        const contribution = BigInt(run.bids.reduce((a, b) => a + b, 0));
         let balance = (
-          await ownerConn.provider.getBalance(ownerConn.address)
-        ).toNumber();
+          await ethers.provider.getBalance(await await ownerConn.getAddress())
+        );
         expect(balance).to.eq(contribution);
 
         // Inactive auction by setting the block.timestamp to the end time of the auction
@@ -341,22 +341,22 @@ describe('BucketAuction', function () {
         await ownerConn.setClaimable(true);
 
         expect(
-          await readonlyConn.amountPurchased(readonly.address),
+          await readonlyConn.amountPurchased(readonly.getAddress()),
         ).to.be.equal(run.numTokens);
-        expect(await readonlyConn.refundAmount(readonly.address)).to.be.equal(
+        expect(await readonlyConn.refundAmount(readonly.getAddress())).to.be.equal(
           run.refund,
         );
 
         await readonlyConn.claimTokensAndRefund();
-        const userData = await readonlyConn.getUserData(readonly.address);
+        const userData = await readonlyConn.getUserData(readonly.getAddress());
         expect(userData.contribution).to.eq(contribution);
         expect(userData.tokensClaimed).to.eq(run.numTokens);
         expect(userData.refundClaimed).to.eq(true);
 
         balance = (
-          await ownerConn.provider.getBalance(ownerConn.address)
-        ).toNumber();
-        expect(balance).to.eq(run.price * run.numTokens);
+          await ethers.provider.getBalance(await await ownerConn.getAddress())
+        );
+        expect(balance).to.eq(BigInt(run.price * run.numTokens));
       });
     });
   });
@@ -367,23 +367,23 @@ describe('BucketAuction', function () {
       await ethers.provider.send('evm_mine', [auctionStartTimestamp]);
       // we can make bids
       let balance = (
-        await ownerConn.provider.getBalance(ownerConn.address)
-      ).toNumber();
-      expect(balance).to.eq(0);
+        await ethers.provider.getBalance(await await ownerConn.getAddress())
+      );
+      expect(balance).to.eq(0n);
       await expect(readonlyConn.bid({ value: 100 })).to.emit(
         readonlyConn,
         'Bid',
       );
 
       balance = (
-        await ownerConn.provider.getBalance(ownerConn.address)
-      ).toNumber();
-      expect(balance).to.eq(100);
+        await ethers.provider.getBalance(await await ownerConn.getAddress())
+      );
+      expect(balance).to.eq(100n);
 
       // Inactive auction by setting the block.timestamp to the end time of the auction
       await ethers.provider.send('evm_mine', [auctionEndTimestamp]);
       // and then we prepare to close the auction and settle the price and refund
-      await ownerConn.setPrice(80);
+      await ownerConn.setPrice(80n);
 
       expect(await ownerConn.getClaimable()).to.be.false;
       await ownerConn.setClaimable(true);
@@ -393,25 +393,25 @@ describe('BucketAuction', function () {
         readonlyConn,
         'Transfer',
       );
-      const userData = await readonlyConn.getUserData(readonly.address);
+      const userData = await readonlyConn.getUserData(readonly.getAddress());
       expect(userData.contribution).to.eq(100);
       expect(userData.tokensClaimed).to.eq(1);
       expect(userData.refundClaimed).to.eq(true);
       balance = (
-        await ownerConn.provider.getBalance(ownerConn.address)
-      ).toNumber();
-      expect(balance).to.eq(80);
+        await ethers.provider.getBalance(await await ownerConn.getAddress())
+      );
+      expect(balance).to.eq(80n);
 
       // we cannot claim again after the first successful claim
-      await expect(readonlyConn.claimTokensAndRefund()).to.be.revertedWith(
+      await expect(readonlyConn.claimTokensAndRefund()).to.revertedWithCustomError(readonlyConn,
         'UserAlreadyClaimed',
       );
 
       // withdraw
       await expect(ownerConn.withdraw()).to.emit(ownerConn, 'Withdraw');
       balance = (
-        await ownerConn.provider.getBalance(ownerConn.address)
-      ).toNumber();
+        await ethers.provider.getBalance(await await ownerConn.getAddress())
+      );
       expect(balance).to.eq(0);
     });
 
@@ -425,7 +425,7 @@ describe('BucketAuction', function () {
         readonlyConn,
         'Transfer',
       );
-      const userData = await readonlyConn.getUserData(readonly.address);
+      const userData = await readonlyConn.getUserData(readonly.getAddress());
       expect(userData.contribution).to.eq(0);
       expect(userData.tokensClaimed).to.eq(0);
       expect(userData.refundClaimed).to.eq(true);
@@ -443,7 +443,7 @@ describe('BucketAuction', function () {
       await ethers.provider.send('evm_mine', [auctionEndTimestamp]);
       await ownerConn.setClaimable(true);
 
-      await expect(readonlyConn.claimTokensAndRefund()).to.be.revertedWith(
+      await expect(readonlyConn.claimTokensAndRefund()).to.be.revertedWithCustomError(readonlyConn, 
         'PriceNotSet',
       );
     });
@@ -460,7 +460,7 @@ describe('BucketAuction', function () {
       await ethers.provider.send('evm_mine', [auctionEndTimestamp]);
       await ownerConn.setPrice(100);
 
-      await expect(readonlyConn.claimTokensAndRefund()).to.be.revertedWith(
+      await expect(readonlyConn.claimTokensAndRefund()).to.be.revertedWithCustomError(readonlyConn,
         'NotClaimable',
       );
     });
@@ -480,7 +480,7 @@ describe('BucketAuction', function () {
       await ownerConn.setPrice(1);
       await ownerConn.setClaimable(true);
 
-      await expect(readonlyConn.claimTokensAndRefund()).to.be.revertedWith(
+      await expect(readonlyConn.claimTokensAndRefund()).to.be.revertedWithCustomError(readonlyConn,
         'NoSupplyLeft',
       );
     });
@@ -499,7 +499,7 @@ describe('BucketAuction', function () {
       await ownerConn.setPrice(1);
 
       // Send tokens
-      await expect(ownerConn.sendTokens(readonly.address, 1)).to.emit(
+      await expect(ownerConn.sendTokens(readonly.getAddress(), 1)).to.emit(
         readonlyConn,
         'Transfer',
       );
@@ -507,7 +507,7 @@ describe('BucketAuction', function () {
       // Should be reverted when re-setting the price if
       //  it is not claimable but the first token is already sent
       await ownerConn.setClaimable(false);
-      await expect(ownerConn.setPrice(1)).to.be.revertedWith(
+      await expect(ownerConn.setPrice(1)).to.be.revertedWithCustomError(ownerConn,
         'CannotSetPriceIfFirstTokenSent',
       );
     });
@@ -527,30 +527,30 @@ describe('BucketAuction', function () {
       await ownerConn.setClaimable(true);
 
       // Send tokens
-      await expect(ownerConn.sendTokens(readonly.address, 1)).to.emit(
+      await expect(ownerConn.sendTokens(readonly.getAddress(), 1)).to.emit(
         readonlyConn,
         'Transfer',
       );
 
-      let userData = await readonlyConn.getUserData(readonly.address);
+      let userData = await readonlyConn.getUserData(readonly.getAddress());
       expect(userData.contribution).to.eq(100);
       expect(userData.tokensClaimed).to.eq(1);
       expect(userData.refundClaimed).to.eq(false);
 
       // Try to re-send tokens and the refund and expect a revert with AlreadySentTokensToUser
       await expect(
-        ownerConn.sendTokensAndRefund(readonly.address),
-      ).to.be.revertedWith('AlreadySentTokensToUser');
+        ownerConn.sendTokensAndRefund(readonly.getAddress()),
+      ).to.be.revertedWithCustomError(ownerConn, 'AlreadySentTokensToUser');
 
       // Issue refund
-      await ownerConn.sendRefund(readonly.address);
-      userData = await readonlyConn.getUserData(readonly.address);
+      await ownerConn.sendRefund(readonly.getAddress());
+      userData = await readonlyConn.getUserData(readonly.getAddress());
       expect(userData.contribution).to.eq(100);
       expect(userData.tokensClaimed).to.eq(1);
       expect(userData.refundClaimed).to.eq(true);
 
       // Try to re-issue the refund and expect a revert with UserAlreadyClaimed
-      await expect(ownerConn.sendRefund(readonly.address)).to.be.revertedWith(
+      await expect(ownerConn.sendRefund(readonly.getAddress())).to.be.revertedWithCustomError(ownerConn, 
         'UserAlreadyClaimed',
       );
     });
@@ -566,9 +566,9 @@ describe('BucketAuction', function () {
       await ethers.provider.send('evm_mine', [auctionStartTimestamp]);
 
       let balance = (
-        await ownerConn.provider.getBalance(ownerConn.address)
-      ).toNumber();
-      expect(balance).to.eq(0);
+        await ethers.provider.getBalance(await ownerConn.getAddress())
+      );
+      expect(balance).to.eq(0n);
 
       await expect(readonlyConn.bid({ value: 100 })).to.emit(
         readonlyConn,
@@ -576,37 +576,38 @@ describe('BucketAuction', function () {
       );
 
       balance = (
-        await ownerConn.provider.getBalance(ownerConn.address)
-      ).toNumber();
-      expect(balance).to.eq(100);
+        await ethers.provider.getBalance(await await ownerConn.getAddress())
+      );
+      expect(balance).to.eq(100n);
 
       // Inactive auction by setting the block.timestamp to the end time of the auction
       await ethers.provider.send('evm_mine', [auctionEndTimestamp]);
       await ownerConn.setPrice(20);
       await ownerConn.setClaimable(true);
 
-      await expect(ownerConn.sendTokensAndRefund(readonly.address)).to.emit(
+      await expect(ownerConn.sendTokensAndRefund(readonly.getAddress())).to.emit(
         readonlyConn,
         'Transfer',
       );
-      const userData = await readonlyConn.getUserData(readonly.address);
-      expect(userData.contribution).to.eq(100);
+      const userData = await readonlyConn.getUserData(readonly.getAddress());
+      expect(userData.contribution).to.eq(100n);
       expect(userData.tokensClaimed).to.eq(5);
       expect(userData.refundClaimed).to.eq(true);
       balance = (
-        await ownerConn.provider.getBalance(ownerConn.address)
-      ).toNumber();
-      expect(balance).to.eq(100);
+        await ethers.provider.getBalance(await ownerConn.getAddress())
+      );
+      expect(balance).to.eq(100n);
 
       // user cannot claim again
-      await expect(readonlyConn.claimTokensAndRefund()).to.be.revertedWith(
+      await expect(readonlyConn.claimTokensAndRefund()).to.be.revertedWithCustomError(
+        readonlyConn,
         'UserAlreadyClaimed',
       );
 
       // owner cannot send tokens and refund again
       await expect(
-        ownerConn.sendTokensAndRefund(readonly.address),
-      ).to.be.revertedWith('UserAlreadyClaimed');
+        ownerConn.sendTokensAndRefund(readonly.getAddress()),
+      ).to.be.revertedWithCustomError(ownerConn, 'UserAlreadyClaimed');
     });
 
     // Two bidders.
@@ -626,9 +627,9 @@ describe('BucketAuction', function () {
       ]);
 
       let balance = (
-        await ownerConn.provider.getBalance(ownerConn.address)
-      ).toNumber();
-      expect(balance).to.eq(0);
+        await ethers.provider.getBalance(await ownerConn.getAddress())
+      );
+      expect(balance).to.eq(0n);
 
       await expect(readonlyConn.bid({ value: 100 })).to.emit(
         readonlyConn,
@@ -640,9 +641,9 @@ describe('BucketAuction', function () {
       );
 
       balance = (
-        await ownerConn.provider.getBalance(ownerConn.address)
-      ).toNumber();
-      expect(balance).to.eq(300);
+        await ethers.provider.getBalance(await ownerConn.getAddress())
+      );
+      expect(balance).to.eq(300n);
 
       // Inactive auction by setting the block.timestamp to the end time of the auction
       await ethers.provider.send('evm_mine', [auctionEndTimestamp]);
@@ -650,24 +651,24 @@ describe('BucketAuction', function () {
       await ownerConn.setClaimable(true);
 
       await ownerConn.sendTokensAndRefundBatch([
-        readonly.address,
-        readonly2.address,
+        readonly.getAddress(),
+        readonly2.getAddress(),
       ]);
 
-      const userData1 = await readonlyConn.getUserData(readonly.address);
+      const userData1 = await readonlyConn.getUserData(readonly.getAddress());
       expect(userData1.contribution).to.eq(100);
       expect(userData1.tokensClaimed).to.eq(0);
       expect(userData1.refundClaimed).to.eq(true);
 
-      const userData2 = await readonlyConn.getUserData(readonly2.address);
+      const userData2 = await readonlyConn.getUserData(readonly2.getAddress());
       expect(userData2.contribution).to.eq(200);
       expect(userData2.tokensClaimed).to.eq(1);
       expect(userData2.refundClaimed).to.eq(true);
 
       balance = (
-        await ownerConn.provider.getBalance(ownerConn.address)
-      ).toNumber();
-      expect(balance).to.eq(110);
+        await ethers.provider.getBalance(await ownerConn.getAddress())
+      );
+      expect(balance).to.eq(110n);
     });
 
     it('sendTokens & sendRefund', async () => {
@@ -685,26 +686,26 @@ describe('BucketAuction', function () {
       await ownerConn.setClaimable(true);
 
       // Send tokens
-      await expect(ownerConn.sendTokens(readonly.address, 2)).to.emit(
+      await expect(ownerConn.sendTokens(readonly.getAddress(), 2)).to.emit(
         readonlyConn,
         'Transfer',
       );
-      await expect(ownerConn.sendTokens(readonly.address, 3)).to.emit(
+      await expect(ownerConn.sendTokens(readonly.getAddress(), 3)).to.emit(
         readonlyConn,
         'Transfer',
       );
       await expect(
-        ownerConn.sendTokens(readonly.address, 1),
-      ).to.be.revertedWith('CannotSendMoreThanUserPurchased');
+        ownerConn.sendTokens(readonly.getAddress(), 1),
+      ).to.be.revertedWithCustomError(ownerConn, 'CannotSendMoreThanUserPurchased');
 
-      let userData = await readonlyConn.getUserData(readonly.address);
+      let userData = await readonlyConn.getUserData(readonly.getAddress());
       expect(userData.contribution).to.eq(100);
       expect(userData.tokensClaimed).to.eq(5);
       expect(userData.refundClaimed).to.eq(false);
 
       // Issue refund
-      await ownerConn.sendRefund(readonly.address);
-      userData = await readonlyConn.getUserData(readonly.address);
+      await ownerConn.sendRefund(readonly.getAddress());
+      userData = await readonlyConn.getUserData(readonly.getAddress());
       expect(userData.contribution).to.eq(100);
       expect(userData.tokensClaimed).to.eq(5);
       expect(userData.refundClaimed).to.eq(true);
@@ -726,9 +727,9 @@ describe('BucketAuction', function () {
       ]);
 
       const balance = (
-        await ownerConn.provider.getBalance(ownerConn.address)
-      ).toNumber();
-      expect(balance).to.eq(0);
+        await ethers.provider.getBalance(await ownerConn.getAddress())
+      );
+      expect(balance).to.eq(0n);
 
       await expect(readonlyConn.bid({ value: 100 })).to.emit(
         readonlyConn,
@@ -745,27 +746,27 @@ describe('BucketAuction', function () {
       await ownerConn.setClaimable(true);
 
       // Issue refund
-      await ownerConn.sendRefundBatch([readonly.address, readonly2.address]);
+      await ownerConn.sendRefundBatch([readonly.getAddress(), readonly2.getAddress()]);
 
-      let userData1 = await readonlyConn.getUserData(readonly.address);
+      let userData1 = await readonlyConn.getUserData(readonly.getAddress());
       expect(userData1.contribution).to.eq(100);
       expect(userData1.tokensClaimed).to.eq(0);
       expect(userData1.refundClaimed).to.eq(true);
 
-      let userData2 = await readonlyConn2.getUserData(readonly2.address);
+      let userData2 = await readonlyConn2.getUserData(readonly2.getAddress());
       expect(userData2.contribution).to.eq(200);
       expect(userData2.tokensClaimed).to.eq(0);
       expect(userData2.refundClaimed).to.eq(true);
 
       // Send tokens
-      await ownerConn.sendTokensBatch([readonly.address, readonly2.address]);
+      await ownerConn.sendTokensBatch([readonly.getAddress(), readonly2.getAddress()]);
 
-      userData1 = await readonlyConn.getUserData(readonly.address);
+      userData1 = await readonlyConn.getUserData(readonly.getAddress());
       expect(userData1.contribution).to.eq(100);
       expect(userData1.tokensClaimed).to.eq(3);
       expect(userData1.refundClaimed).to.eq(true);
 
-      userData2 = await readonlyConn2.getUserData(readonly2.address);
+      userData2 = await readonlyConn2.getUserData(readonly2.getAddress());
       expect(userData2.contribution).to.eq(200);
       expect(userData2.tokensClaimed).to.eq(6);
       expect(userData2.refundClaimed).to.eq(true);
@@ -785,12 +786,12 @@ describe('BucketAuction', function () {
       await ownerConn.setPrice(20);
       await ownerConn.setClaimable(true);
 
-      await expect(ownerConn.sendAllTokens(readonly.address)).to.emit(
+      await expect(ownerConn.sendAllTokens(readonly.getAddress())).to.emit(
         readonlyConn,
         'Transfer',
       );
 
-      const userData = await readonlyConn.getUserData(readonly.address);
+      const userData = await readonlyConn.getUserData(readonly.getAddress());
       expect(userData.contribution).to.eq(100);
       expect(userData.tokensClaimed).to.eq(5);
       expect(userData.refundClaimed).to.eq(false);
@@ -798,56 +799,56 @@ describe('BucketAuction', function () {
 
     it('Reverts if not owner', async () => {
       await expect(
-        readonlyConn.sendTokens(readonly.address, 1),
-      ).to.be.revertedWith('Unauthorized');
+        readonlyConn.sendTokens(readonly.getAddress(), 1),
+      ).to.be.revertedWithCustomError(readonlyConn, 'Unauthorized');
       await expect(
-        readonlyConn.sendRefund(readonly.address),
-      ).to.be.revertedWith('Unauthorized');
+        readonlyConn.sendRefund(readonly.getAddress()),
+      ).to.be.revertedWithCustomError(readonlyConn, 'Unauthorized');
       await expect(
-        readonlyConn.sendAllTokens(readonly.address),
-      ).to.be.revertedWith('Unauthorized');
+        readonlyConn.sendAllTokens(readonly.getAddress()),
+      ).to.be.revertedWithCustomError(readonlyConn, 'Unauthorized');
       await expect(
-        readonlyConn.sendTokensBatch([readonly.address]),
-      ).to.be.revertedWith('Unauthorized');
+        readonlyConn.sendTokensBatch([readonly.getAddress()]),
+      ).to.be.revertedWithCustomError(readonlyConn, 'Unauthorized');
       await expect(
-        readonlyConn.sendRefundBatch([readonly.address]),
-      ).to.be.revertedWith('Unauthorized');
+        readonlyConn.sendRefundBatch([readonly.getAddress()]),
+      ).to.be.revertedWithCustomError(readonlyConn, 'Unauthorized');
       await expect(
-        readonlyConn.sendTokensAndRefund(readonly.address),
-      ).to.be.revertedWith('Unauthorized');
+        readonlyConn.sendTokensAndRefund(readonly.getAddress()),
+      ).to.be.revertedWithCustomError(readonlyConn, 'Unauthorized');
       await expect(
-        readonlyConn.sendTokensAndRefundBatch([readonly.address]),
-      ).to.be.revertedWith('Unauthorized');
+        readonlyConn.sendTokensAndRefundBatch([readonly.getAddress()]),
+      ).to.be.revertedWithCustomError(readonlyConn, 'Unauthorized');
     });
 
     it('Reverts if price not set', async () => {
       await expect(
-        ownerConn.amountPurchased(readonly.address),
-      ).to.be.revertedWith('PriceNotSet');
-      await expect(ownerConn.refundAmount(readonly.address)).to.be.revertedWith(
+        ownerConn.amountPurchased(readonly.getAddress()),
+      ).to.be.revertedWithCustomError(ownerConn, 'PriceNotSet');
+      await expect(ownerConn.refundAmount(readonly.getAddress())).to.be.revertedWithCustomError(ownerConn,
         'PriceNotSet',
       );
       await expect(
-        ownerConn.sendTokens(readonly.address, 1),
-      ).to.be.revertedWith('PriceNotSet');
-      await expect(ownerConn.sendRefund(readonly.address)).to.be.revertedWith(
+        ownerConn.sendTokens(readonly.getAddress(), 1),
+      ).to.be.revertedWithCustomError(ownerConn, 'PriceNotSet');
+      await expect(ownerConn.sendRefund(readonly.getAddress())).to.be.revertedWithCustomError(ownerConn,
         'PriceNotSet',
       );
       await expect(
-        ownerConn.sendAllTokens(readonly.address),
-      ).to.be.revertedWith('PriceNotSet');
+        ownerConn.sendAllTokens(readonly.getAddress()),
+      ).to.be.revertedWithCustomError(ownerConn,'PriceNotSet');
       await expect(
-        ownerConn.sendTokensBatch([readonly.address]),
-      ).to.be.revertedWith('PriceNotSet');
+        ownerConn.sendTokensBatch([readonly.getAddress()]),
+      ).to.be.revertedWithCustomError(ownerConn,'PriceNotSet');
       await expect(
-        ownerConn.sendRefundBatch([readonly.address]),
-      ).to.be.revertedWith('PriceNotSet');
+        ownerConn.sendRefundBatch([readonly.getAddress()]),
+      ).to.be.revertedWithCustomError(ownerConn,'PriceNotSet');
       await expect(
-        ownerConn.sendTokensAndRefund(readonly.address),
-      ).to.be.revertedWith('PriceNotSet');
+        ownerConn.sendTokensAndRefund(readonly.getAddress()),
+      ).to.be.revertedWithCustomError(ownerConn,'PriceNotSet');
       await expect(
-        ownerConn.sendTokensAndRefundBatch([readonly.address]),
-      ).to.be.revertedWith('PriceNotSet');
+        ownerConn.sendTokensAndRefundBatch([readonly.getAddress()]),
+      ).to.be.revertedWithCustomError(ownerConn,'PriceNotSet');
     });
   });
 });

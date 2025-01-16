@@ -1,8 +1,8 @@
-import { SignerWithAddress } from '@nomiclabs/hardhat-ethers/signers';
 import chai, { expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
 import { ethers } from 'hardhat';
 import { ERC721BatchTransfer, MockERC721A } from '../../typechain-types';
+import { Signer } from "ethers";
 
 chai.use(chaiAsPromised);
 
@@ -17,7 +17,7 @@ const addresses = {
 describe('ERC721BatchTransfer', function () {
   let transferContract: ERC721BatchTransfer;
   let nftContract: MockERC721A;
-  let owner: SignerWithAddress;
+  let owner: Signer;
 
   beforeEach(async () => {
     [owner] = await ethers.getSigners();
@@ -25,28 +25,28 @@ describe('ERC721BatchTransfer', function () {
     const batchTransfer = await (
       await ethers.getContractFactory('ERC721BatchTransfer')
     ).deploy();
-    await batchTransfer.deployed();
+    await batchTransfer.waitForDeployment();
     transferContract = batchTransfer.connect(owner);
 
     const erc721a = await (
       await ethers.getContractFactory('MockERC721A')
     ).deploy();
-    await erc721a.deployed();
+    await erc721a.waitForDeployment();
     nftContract = erc721a.connect(owner);
 
-    await nftContract.setApprovalForAll(transferContract.address, true);
+    await nftContract.setApprovalForAll(transferContract.getAddress(), true);
 
-    await nftContract.mintBatch(owner.address, 5);
+    await nftContract.mintBatch(owner.getAddress(), 5);
 
     for (let i = 0; i < 5; i++) {
       const tokenOwner = await nftContract.ownerOf(i);
-      expect(tokenOwner).to.equal(owner.address);
+      expect(tokenOwner).to.equal(await owner.getAddress());
     }
   });
 
   it('batchTransferToSingleWallet', async () => {
     await transferContract.batchTransferToSingleWallet(
-      nftContract.address,
+      nftContract.getAddress(),
       addresses.addr1,
       [0, 1, 2, 3, 4],
     );
@@ -59,7 +59,7 @@ describe('ERC721BatchTransfer', function () {
   it('safeBatchTransferToSingleWallet', async () => {
     const tokenIds = [0, 1, 2, 3, 4];
     await transferContract.safeBatchTransferToSingleWallet(
-      nftContract.address,
+      nftContract.getAddress(),
       addresses.addr1,
       [0, 1, 2, 3, 4],
     );
@@ -79,7 +79,7 @@ describe('ERC721BatchTransfer', function () {
       addresses.addr5,
     ];
     await transferContract.batchTransferToMultipleWallets(
-      nftContract.address,
+      nftContract.getAddress(),
       tos,
       tokenIds,
     );
@@ -99,7 +99,7 @@ describe('ERC721BatchTransfer', function () {
       addresses.addr4,
     ];
     await transferContract.safeBatchTransferToMultipleWallets(
-      nftContract.address,
+      nftContract.getAddress(),
       tos,
       tokenIds,
     );
@@ -119,18 +119,18 @@ describe('ERC721BatchTransfer', function () {
       addresses.addr5,
     ];
     await transferContract.batchTransferToMultipleWallets(
-      nftContract.address,
+      nftContract.getAddress(),
       tos,
       tokenIds,
     );
 
     await expect(
       transferContract.batchTransferToMultipleWallets(
-        nftContract.address,
+        nftContract.getAddress(),
         tos,
         tokenIds,
       ),
-    ).to.be.revertedWith('NotOwnerOfToken');
+    ).to.be.revertedWithCustomError(transferContract, 'NotOwnerOfToken');
   });
 
   it('revert if invalid arguments', async () => {
@@ -145,10 +145,10 @@ describe('ERC721BatchTransfer', function () {
 
     await expect(
       transferContract.batchTransferToMultipleWallets(
-        nftContract.address,
+        nftContract.getAddress(),
         tos,
         tokenIds,
       ),
-    ).to.be.revertedWith('InvalidArguments');
+    ).to.be.revertedWithCustomError(transferContract, 'InvalidArguments');
   });
 });
