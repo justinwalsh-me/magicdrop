@@ -3,8 +3,8 @@ node_modules
 coverage.json
 typechain
 typechain-types
-cache
-artifacts
+cache*/
+artifacts*/
 .turbo
 .vscode
 dist

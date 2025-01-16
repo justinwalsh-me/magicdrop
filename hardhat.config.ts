@@ -1,9 +1,8 @@
 import 'dotenv/config';
 
 import "@matterlabs/hardhat-zksync";
-import "@nomicfoundation/hardhat-verify";
-import '@nomiclabs/hardhat-waffle';
-import '@typechain/hardhat';
+import "@matterlabs/hardhat-zksync-upgradable"
+import "@nomicfoundation/hardhat-chai-matchers"
 import 'hardhat-contract-sizer';
 import 'hardhat-gas-reporter';
 import 'hardhat-watcher';
