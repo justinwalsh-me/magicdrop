@@ -1,5 +1,6 @@
 import 'dotenv/config';
 
+import "@matterlabs/hardhat-zksync";
 import "@nomicfoundation/hardhat-verify";
 import '@nomiclabs/hardhat-waffle';
 import '@typechain/hardhat';
@@ -45,7 +46,7 @@ import {
 
 const config: HardhatUserConfig = {
   solidity: {
-    version: '0.8.22',
+    version: '0.8.24',
     settings: {
       viaIR: true,
       optimizer: {
@@ -57,6 +58,13 @@ const config: HardhatUserConfig = {
           },
         },
       },
+    },
+  },
+  zksolc: {
+    version: "1.5.7",
+    settings: {
+      // Note: This must be true to call NonceHolder & ContractDeployer system contracts
+      enableEraVMExtensions: false,
     },
   },
   contractSizer: {
@@ -128,6 +136,13 @@ const config: HardhatUserConfig = {
       accounts:
         process.env.PRIVATE_KEY !== undefined ? [process.env.PRIVATE_KEY] : [],
     },
+    abstract: {
+      url: process.env.ABSTRACT_URL || 'https://api.testnet.abs.xyz',
+      accounts: process.env.PRIVATE_KEY !== undefined ? [process.env.PRIVATE_KEY] : [],
+      ethNetwork: "sepolia",
+      zksync: true,
+      chainId: 11124,
+    }
   },
   gasReporter: {
     enabled: process.env.REPORT_GAS !== undefined,
@@ -143,7 +158,15 @@ const config: HardhatUserConfig = {
           apiURL: "https://api.apescan.io/api",
           browserURL: "https://apescan.io/"
         }
-      }
+      },
+      {
+        network: "abstract",
+        chainId: 11124,
+        urls: {
+          apiURL: "https://api-sepolia.abscan.org/api",
+          browserURL: "https://sepolia.abscan.org/",
+        },
+      },
     ]
   },
   sourcify: {
